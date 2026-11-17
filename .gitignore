@@ -5,3 +5,8 @@ __pycache__/
 build/
 uv.lock
 .pytest_cache/
+
+# Local state (session cookies, browser profile), downloads, reference code
+.bb-home/
+downloads/
+.reference/
