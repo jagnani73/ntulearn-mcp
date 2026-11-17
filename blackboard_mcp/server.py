@@ -18,11 +18,13 @@ from .sync import Syncer, safe
 mcp = FastMCP(
     "blackboard",
     instructions=(
-        "Tools for the student's Blackboard (Ultra). bb_courses lists current courses; bb_browse shows a course's "
-        "content; bb_upcoming lists due dates; bb_announcements shows recent announcements; bb_download saves one "
-        "item's files; bb_sync downloads every current course's PDFs, skipping sites that aren't courses and posters, "
-        "handbooks and forms (check bb_sync_status; bb_set_courses changes which courses it pulls). If any tool reports "
-        "that sign-in is needed, call bb_login, which opens a browser window for the university sign-in."
+        "Tools for the student's Blackboard (Ultra), by default NTU's NTULearn. bb_courses lists current courses; "
+        "bb_browse shows a course's content; bb_read returns a file's text (slides with speaker notes, PDFs, Word, "
+        "Excel) without saving it; bb_upcoming lists due dates; bb_announcements shows recent announcements; "
+        "bb_grades shows the gradebook; bb_download saves one item's files; bb_sync downloads every current course's "
+        "study files, skipping sites that aren't courses and posters, handbooks and forms (check bb_sync_status; "
+        "bb_set_courses changes which courses it pulls). If any tool reports that sign-in is needed, call bb_login, "
+        "which opens a browser window for the university sign-in."
     ),
 )
 
@@ -198,6 +200,37 @@ async def bb_read(course: str, content_id: str, file: str | None = None, offset:
 
 
 @mcp.tool()
+async def bb_grades(course: str | None = None) -> dict:
+    """The gradebook for one course, or every current course if none is given: each graded item (assignment,
+    quiz, exam) with points possible, due date, and your score and feedback once released. Courses that don't
+    use the gradebook are listed under `no_gradebook`."""
+    def go():
+        bb = _bb()
+        cs = [bb.find_course(course)] if course else Syncer(_settings, bb).courses()
+        rows, empty = [], []
+        for c in cs:
+            cols = [col for col in bb.gradebook_columns(c.id)
+                    if (col.get("availability") or {}).get("available") != "No"]
+            if not cols:
+                empty.append(c.short_name())
+                continue
+            mine = {g.get("columnId"): g for g in bb.my_grades(c.id)}
+            for col in cols:
+                g = mine.get(col["id"]) or {}
+                grading = col.get("grading") or {}
+                if grading.get("type") == "Calculated" and g.get("score") is None:
+                    continue  # running totals with nothing in them yet
+                rows.append({
+                    "course": c.short_name(), "item": col.get("displayName") or col.get("name"),
+                    "possible": (col.get("score") or {}).get("possible"), "due": grading.get("due"),
+                    "score": g.get("score"), "grade": (g.get("displayGrade") or {}).get("text") or g.get("text"),
+                    "status": g.get("status") or "not graded",
+                    "feedback": html_to_text(g.get("feedback"))[:800] or None, "content_id": col.get("contentId"),
+                })
+        return {"grades": rows, "no_gradebook": empty}
+    return await _run(go)
+
+
 @mcp.tool()
 async def bb_upcoming(days: int = 21) -> dict:
     """Due dates from Blackboard for the next `days` days (assignments, quizzes, Turnitin)."""

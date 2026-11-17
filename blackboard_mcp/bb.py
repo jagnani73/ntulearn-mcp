@@ -311,6 +311,13 @@ class Blackboard:
         except (PermissionError, httpx.HTTPStatusError):
             return []
 
+    def my_grades(self, course_pk: str) -> list[dict]:
+        """The signed-in student's grade entries in one course (only columns with something recorded)."""
+        try:
+            return list(self.paged(f"{API}/v1/courses/{course_pk}/gradebook/users/{self.me()['id']}"))
+        except (PermissionError, httpx.HTTPStatusError):
+            return []
+
     def calendar_due(self, since: datetime, until: datetime) -> list[dict]:
         """Due dates across all courses (gradebook columns on the calendar)."""
         items: list[dict] = []
