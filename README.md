@@ -6,7 +6,8 @@
 
 A read-only [MCP](https://modelcontextprotocol.io) server for **NTULearn**, NTU Singapore's Blackboard Learn
 (Ultra). Claude Code, Claude Desktop, Cursor or any other MCP client can use it to list your courses, browse and read
-course files, check deadlines, announcements and grades, and sync a semester's material to disk.
+course files, read lecture recordings as transcripts, check deadlines, announcements and grades, and sync a
+semester's material to disk.
 
 It's a fork of [Mattlo0546/blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp), which already had the
 hard part working: signing in through the university's SSO and MFA in a real browser window, with no API key and no
@@ -15,6 +16,10 @@ cookie copying. The fork adds what NTU needed:
 - `bb_read` returns the text of course files without saving them: slides with speaker notes, PDFs, Word, Excel
   and code. The extractors are adapted from [kingdonkatsu/ntulearn-mcp](https://github.com/kingdonkatsu/ntulearn-mcp).
 - `bb_grades` lists every gradebook item with points possible, due date, status and feedback.
+- `bb_recordings` and `bb_transcript` reach the course Media Gallery, which is Kaltura. They list a course's
+  lecture recordings and turn one into text from its captions, with each paragraph stamped with the time it starts.
+  The Kaltura side follows what [ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder)
+  worked out.
 - Sync works on NTU courses. Upstream synced PDFs only, and NTU lecturers mostly upload `.pptx`, so sync now takes
   slides, documents, spreadsheets, notebooks, archives and code. It also files NTU's `W1`, `W2` folders under
   `Week 01`, `Week 02`.
@@ -25,9 +30,6 @@ cookie copying. The fork adds what NTU needed:
   accept in a folder name.
 - Course names are shorter: `AY2627-T2-SC6106-BLOCKCHAIN DEVELOPMENT FUNDAMENTALS - PART 1` becomes
   `SC6106 BLOCKCHAIN DEVELOPMENT FUNDAMENTALS - PART 1`, in tool output and in folder names.
-
-Lecture recordings aren't covered yet. The course Media Gallery is a separate Kaltura site (see
-[Roadmap](#roadmap)).
 
 ## Setup
 
@@ -73,6 +75,8 @@ using the saved browser profile, and if that fails, `bb_login` opens the window 
 | `bb_upcoming` | Due dates from the Blackboard calendar for the next N days (default 21) |
 | `bb_announcements` | Recent announcements, for one course or all current ones |
 | `bb_grades` | Gradebook items with points possible, due date, your score, status and feedback |
+| `bb_recordings` | A course's lecture recordings: title, length, when recorded, caption languages, second stream |
+| `bb_transcript` | One recording as text from its captions, in paragraphs stamped `[0:12:30]`, paged with `offset` |
 | `bb_sync` / `bb_sync_status` | Downloads study files from this year's courses in the background. Only new or changed files are fetched. |
 | `bb_set_courses` | Changes which courses a full sync pulls |
 
@@ -83,6 +87,9 @@ Things that are useful to know on NTULearn:
   included.
 - `bb_sync` skips sites that aren't courses (the academic integrity module, for example) and files that aren't for
   studying, like posters, handbooks and forms. `bb_set_courses` brings a skipped course back.
+- The first recordings call for a course takes about half a minute, because it opens the Media Gallery in a hidden
+  browser. Later calls reuse that session for three hours. A recording with no captions yet (often the latest one)
+  has no transcript.
 
 ## Settings
 
@@ -104,19 +111,13 @@ All optional. Environment variables override `<BB_MCP_HOME>/config.json`.
   NTULearn until the session expires. Delete the folder to sign out.
 - Cookies only go to `ntulearn.ntu.edu.sg`. Downloads still work when the redirect lands on Blackboard's file
   host, because that host doesn't need them.
+- Recordings go through the course's own LTI launch into the Media Gallery, run in the hidden sign-in browser. The
+  Kaltura session taken from a lecture page is kept in memory only, never written to disk.
 - Requests carry a `blackboard-mcp/0.1` user agent, so NTU's logs can tell them apart from a browser.
 - Your MCP client sees whatever the tools return. Course content, announcements and grades go to the model
   provider like any other tool result.
 
 Using your session this way may not fit NTU's IT acceptable use policy. That's your call.
-
-## Roadmap
-
-Lecture recordings and their captions, from the course Media Gallery. The gallery is NTU's Kaltura MediaSpace,
-opened through an LTI launch from the course (`x-bb-bltiplacement-NewUCVGalleryLTI_1_1` in `bb_browse`). The
-Kaltura side is already worked out in
-[ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder). What's still
-open is getting a Kaltura session from the Playwright browser through that launch.
 
 ## Development
 
@@ -133,5 +134,7 @@ laid out and what was verified against the live NTULearn.
 - [Mattlo0546/blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp) (MIT): the base of this fork
 - [kingdonkatsu/ntulearn-mcp](https://github.com/kingdonkatsu/ntulearn-mcp) (MIT): the file text extractors in
   `blackboard_mcp/extract.py`
+- [ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder): the Kaltura
+  findings behind `blackboard_mcp/kaltura.py`
 
 Not affiliated with NTU or Blackboard. MIT licence; see [LICENSE](LICENSE).

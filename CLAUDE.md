@@ -22,6 +22,7 @@ pptx-heavy content, and neither covers lecture recordings.
 | `blackboard_mcp/auth.py` | Playwright sign-in (interactive, plus headless silent refresh) and the saved cookies |
 | `blackboard_mcp/bb.py` | REST client over the saved session: courses, content, files, gradebook, calendar, announcements |
 | `blackboard_mcp/extract.py` | Text out of pptx/pdf/docx/xlsx/text bytes. Adapted from ntulearn-mcp; its MIT notice is in `LICENSE` |
+| `blackboard_mcp/kaltura.py` | Media Gallery: headless LTI launch, entry IDs off the gallery page, KS probing, Kaltura API, captions to text |
 | `blackboard_mcp/sync.py` | Incremental course sync and file/folder naming (`safe`, `parse_week`, `STUDY_EXTS`) |
 | `blackboard_mcp/relevance.py` | Which sites are real courses and which files are for studying (upstream, unchanged) |
 | `blackboard_mcp/server.py` | FastMCP tools. Each wraps blocking client code in `_run`, which turns errors into `{"error": …}` |
@@ -55,8 +56,8 @@ Local, gitignored:
   `courses/{id}/gradebook/users/{userId}`. Most courses use it; SC6104, SC6107, SC6108 and SC6128 have no columns.
 - The calendar is thin. Quiz and project deadlines are often only written in the item title and have no
   `grading.due`, so `bb_upcoming` doesn't see them.
-- The Media Gallery shows up in `bb_browse` as handler `x-bb-bltiplacement-NewUCVGalleryLTI_1_1`. It's an LTI
-  launch into Kaltura on `ntulearnv1.ntu.edu.sg`, which isn't reachable directly.
+- The Media Gallery shows up in `bb_browse` as handler `x-bb-bltiplacement-NewUCVGalleryLTI_1_1`. Despite the
+  name it's Kaltura's LTI 1.3 tool on `ntulearnv1.ntu.edu.sg`. See "Lecture recordings" below.
 
 ## Running and checking changes
 
@@ -75,14 +76,34 @@ checkout (`uv tool install --editable . --force`), so code changes apply without
 
 Don't add tests unless asked. Check changes by running them against NTULearn.
 
-## Next: lecture recordings (Kaltura)
+## Lecture recordings (Kaltura)
 
-The Kaltura side is documented in `D:/Work/ntulearn-media-gallery-downloader/CLAUDE.md`: partner 117,
-`api.sg.kaltura.com`, video through `playManifest` (not `flavorAsset.getDownloadUrl`, which the KAF session can't
-call), dual-stream recordings as parent and child entries, captions on the parent via
-`caption_captionAsset.getUrl`, and `media.list` by category returning nothing, so entries come from the gallery
-page itself. The open problem is getting a Kaltura session (KS) through the LTI launch inside the Playwright
-profile. Captions as text would let the model summarise a lecture.
+`bb_recordings` and `bb_transcript` go through `server._with_gallery`, which keeps one `kaltura.Gallery` per course
+for three hours and relaunches once if Kaltura rejects the session. Opening a gallery (`kaltura.open_gallery`) takes
+about 30 seconds and runs headless under `auth.PROFILE_LOCK`, since Chrome allows one process per profile. Verified
+on SC6106 and SC6104 on 2026-11-17:
+
+1. `Blackboard.media_gallery` finds the gallery item and reads its launch link from the **private** API
+   (`/learn/api/v1/courses/{id}/contents/{id}` → `contentDetail[handler].launchLink`, e.g.
+   `/webapps/blackboard/execute/blti/launchPlacement?blti_placement_id=_1327_1&content_id=…&course_id=…`) and the
+   tool host from `domainConfig.primaryDomain`. The public API only gives the placement handle, and the item's
+   `/ultra/redirect` link never opens the tool in a headless browser.
+2. Opening that link top-level (minus `&wrapped=true`) loads `contentWrapper.jsp` with the gallery in a frame on
+   `ntulearnv1.ntu.edu.sg/channel/<course>/<id>`. The saved cookies are added to the Playwright context first,
+   because the persistent profile can drop Blackboard's session cookies between runs.
+3. Entry IDs come off the frame's HTML (thumbnail URLs, `/media/t/<id>` links). Kaltura can't list a channel for a
+   KAF session (see the extension's notes), so the page is the only source.
+4. The gallery HTML's KS candidates all fail (`INVALID_ACTIONS_LIMIT` or `INVALID_KS`). One of the five on a
+   lecture page (`/media/t/<id>`, fetched with `ctx.request`) is a full user session. Probe each with
+   `baseentry.list`; length doesn't identify it.
+5. With that KS: `baseentry.list` (names, durations, `createdAt`), `parentEntryIdIn` for second streams,
+   `caption_captionasset.list` with `entryIdIn` (status 2 = ready), and `getUrl`, which returns a token-free CDN
+   URL to an SRT. `captions_to_text` turns it into minute-stamped paragraphs.
+
+The Kaltura facts behind this (partner 117, `api.sg.kaltura.com`, the decoy `analytics.*` host, captions on the
+parent entry, `playManifest` for video) are in `D:/Work/ntulearn-media-gallery-downloader/CLAUDE.md`. Video
+download isn't exposed as a tool; the extension does that. Gallery "load more" paging is handled but untested,
+because every gallery so far fit on one page (12 recordings).
 
 ## Conventions
 
