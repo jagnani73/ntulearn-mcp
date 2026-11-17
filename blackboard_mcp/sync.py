@@ -27,7 +27,8 @@ STUDY_EXTS = (".pdf", ".ppt", ".pptx", ".pps", ".ppsx", ".doc", ".docx", ".rtf",
 NOISE = re.compile(r"welcome|help for students|help and support|contacts?\b|communication|re/?play|panopto|echo ?360|"
                    r"discussion|general questions|forum|student (support|voice)|announcements?", re.I)
 WEEK = [re.compile(r"(?<![a-z])week[\s_:-]*(\d{1,2})(?!\d)", re.I),
-        re.compile(r"(?<![a-z])(?:lecture|teaching|session|topic)[\s_-]*(\d{1,2})(?!\d)", re.I)]
+        re.compile(r"(?<![a-z])(?:lecture|teaching|session|topic)[\s_-]*(\d{1,2})(?!\d)", re.I),
+        re.compile(r"(?<![a-z0-9])w[\s_-]?(\d{1,2})(?![a-z0-9])", re.I)]  # NTU: "W1 Blockchain Fundamentals"
 YEAR_WINDOW = timedelta(days=270)  # courses created within ~9 months of your newest one count as this year's
 
 
