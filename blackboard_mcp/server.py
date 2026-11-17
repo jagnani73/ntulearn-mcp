@@ -43,6 +43,8 @@ async def _run(fn, *args):
         return {"login_required": True, "message": str(e)}
     except (ValueError, PermissionError) as e:
         return {"error": str(e)}
+    except OSError as e:  # e.g. a download folder Windows refuses
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 @mcp.tool()

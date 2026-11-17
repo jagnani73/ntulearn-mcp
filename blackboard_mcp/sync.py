@@ -31,8 +31,9 @@ YEAR_WINDOW = timedelta(days=270)  # courses created within ~9 months of your ne
 
 def safe(name: str, maxlen: int = 80) -> str:
     name = re.sub(r"\s*:\s*", " - ", name or "Untitled")
-    name = re.sub(r'[\\/*?"<>|\x00-\x1f]+', "_", name).strip(" .")
-    return (name or "Untitled")[:maxlen]
+    name = re.sub(r'[\\/*?"<>|\x00-\x1f]+', "_", name)
+    # Strip after cutting: Windows can't create a folder whose name ends in a space or a dot.
+    return name[:maxlen].strip(" .") or "Untitled"
 
 
 def parse_week(*texts: str | None) -> int | None:
