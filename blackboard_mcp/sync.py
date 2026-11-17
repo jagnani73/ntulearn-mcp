@@ -17,11 +17,10 @@ from typing import Callable
 
 from . import relevance
 from .auth import LoginRequired
-from .bb import Blackboard, Course, body_links, handler_id, parse_dt
+from .bb import DOC_BODY, Blackboard, Course, body_links, handler_id, parse_dt
 from .config import Settings
 
 FOLDERISH = {"x-bb-folder", "x-bb-lesson", "x-bb-module-page"}
-DOC_BODY = "ultraDocumentBody"  # Ultra stores a Document as a folder + a child holding the body
 NOISE = re.compile(r"welcome|help for students|help and support|contacts?\b|communication|re/?play|panopto|echo ?360|"
                    r"discussion|general questions|forum|student (support|voice)|announcements?", re.I)
 WEEK = [re.compile(r"(?<![a-z])week[\s_:-]*(\d{1,2})(?!\d)", re.I),

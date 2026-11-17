@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 
 import anyio
 from mcp.server.fastmcp import FastMCP
 
+from . import extract
 from .auth import LoginRequired, browser_login
 from .bb import Blackboard, body_links, handler_id, html_to_text, parse_dt
 from .config import load_settings
@@ -27,6 +29,9 @@ mcp = FastMCP(
 _settings = load_settings()
 _job: dict = {"running": False}
 _job_lock = threading.Lock()
+# Extracted text of recently read items, so paging through a long deck with bb_read doesn't re-download it.
+_read_cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
+READ_CACHE_SIZE, READ_CACHE_TTL = 8, 600
 
 
 def _bb() -> Blackboard:
@@ -140,21 +145,59 @@ async def bb_download(course: str, content_id: str) -> dict:
         bb = _bb()
         c = bb.find_course(course)
         folder = _settings.download_dir / safe(c.short_name(), 60) / "Downloads"
+        item, files = bb.content_files(c.id, content_id)
         paths = []
-        for att in bb.attachments(c.id, content_id):
-            dest = folder / safe(att.get("fileName") or att["id"], 120)
-            bb.download(bb.attachment_url(c.id, content_id, att["id"]), dest)
+        for name, url in files:
+            dest = folder / safe(name, 120)
+            bb.download(url, dest)
             paths.append(str(dest))
-        item = bb.get(f"/learn/api/public/v1/courses/{c.id}/contents/{content_id}")
-        for ln in body_links(item.get("body"), _settings.base_url):
-            if ln["blackboard_file"] and not ln.get("inline_image"):
-                dest = folder / safe(ln["text"], 120)
-                bb.download(ln["url"], dest)
-                paths.append(str(dest))
         return {"title": item.get("title"), "files": paths}
     return await _run(go)
 
 
+@mcp.tool()
+async def bb_read(course: str, content_id: str, file: str | None = None, offset: int = 0,
+                  max_chars: int = 30000) -> dict:
+    """Read the files on one content item as text without saving them: slides (.pptx, with speaker notes), PDFs,
+    Word, Excel, and text or code files. `file` picks one by (part of) its name when the item holds several. Long
+    text comes back in pieces: call again with offset=next_offset for the rest. `content_id` comes from bb_browse."""
+    def go():
+        bb = _bb()
+        c = bb.find_course(course)
+        key = (c.id, content_id, (file or "").lower())
+        hit = _read_cache.get(key)
+        if hit and time.time() - hit[0] < READ_CACHE_TTL:
+            doc = hit[1]
+            _read_cache.move_to_end(key)
+        else:
+            item, files = bb.content_files(c.id, content_id)
+            if file:
+                files = [f for f in files if file.lower() in f[0].lower()]
+            if not files:
+                what = f"file matching '{file}'" if file else "files"
+                raise ValueError(f"No {what} on '{item.get('title')}'. Use bb_browse to find the item that holds it.")
+            parts, meta = [], []
+            for name, url in files:
+                try:
+                    data, ctype = bb.fetch_bytes(url)
+                    res = extract.extract(name, ctype, data)
+                except ValueError as e:  # over the size limit
+                    res = {"error": str(e)}
+                meta.append({"name": name, **{k: v for k, v in res.items() if k != "text"}})
+                if res.get("text"):
+                    parts.append(f"# {name}\n\n{res['text']}")
+            doc = {"title": item.get("title"), "files": meta, "text": "\n\n".join(parts)}
+            _read_cache[key] = (time.time(), doc)
+            while len(_read_cache) > READ_CACHE_SIZE:
+                _read_cache.popitem(last=False)
+        text, start = doc["text"], max(0, offset)
+        end = min(len(text), start + min(max(max_chars, 1000), 100_000))
+        return {"course": c.short_name(), "title": doc["title"], "files": doc["files"], "total_chars": len(text),
+                "offset": start, "next_offset": end if end < len(text) else None, "text": text[start:end]}
+    return await _run(go)
+
+
+@mcp.tool()
 @mcp.tool()
 async def bb_upcoming(days: int = 21) -> dict:
     """Due dates from Blackboard for the next `days` days (assignments, quizzes, Turnitin)."""

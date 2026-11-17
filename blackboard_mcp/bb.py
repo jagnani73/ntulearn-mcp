@@ -22,6 +22,7 @@ UNIT_CODE = re.compile(r"(?<![A-Z0-9])([A-Z]{2,5}\d{3,5})(?!\d)")
 # "AY2627-T2-Aug(T)-SC6131-…". Everything before the course code is dropped from short names.
 NTU_TERM_PREFIX = re.compile(r"^AY\d{4}-T\d+-(?:[^-]+-)*?(?=[A-Z]{2,5}\d{3,5}-)")
 API = "/learn/api/public"
+DOC_BODY = "ultraDocumentBody"  # Ultra stores a Document as a folder + a child holding the body
 
 
 def unit_code(*texts: str | None) -> str | None:
@@ -263,8 +264,45 @@ class Blackboard:
         finally:
             r.close()
 
+    def fetch_bytes(self, url: str, *, max_mb: float = 25) -> tuple[bytes, str]:
+        """Read a file into memory (for extracting its text). Returns (bytes, content_type)."""
+        limit = max_mb * 1024 * 1024
+        r = self._request("GET", url, stream=True)
+        try:
+            if r.status_code >= 400:
+                raise PermissionError(f"{r.status_code} downloading {url}")
+            ctype = r.headers.get("content-type", "application/octet-stream").split(";")[0]
+            buf = bytearray()
+            for chunk in r.iter_bytes(1 << 16):
+                buf += chunk
+                if len(buf) > limit:
+                    raise ValueError(f"file is over {max_mb:.0f} MB; use bb_download instead")
+            return bytes(buf), ctype
+        finally:
+            r.close()
+
     def attachment_url(self, course_pk: str, content_id: str, att_id: str) -> str:
         return f"{API}/v1/courses/{course_pk}/contents/{content_id}/attachments/{att_id}/download"
+
+    def content_files(self, course_pk: str, content_id: str) -> tuple[dict, list[tuple[str, str]]]:
+        """(item, [(file name, download URL)]) for the files attached to or embedded in one content item.
+
+        An Ultra Document is a folder whose body lives in an `ultraDocumentBody` child, so a folder with no
+        files of its own is looked into one level for that child."""
+        item = self.get(f"{API}/v1/courses/{course_pk}/contents/{content_id}")
+        files = self._item_files(course_pk, item)
+        if not files and item.get("hasChildren"):
+            for child in self.contents(course_pk, content_id):
+                if child.get("title") == DOC_BODY:
+                    files += self._item_files(course_pk, child)
+        return item, files
+
+    def _item_files(self, course_pk: str, item: dict) -> list[tuple[str, str]]:
+        files = [(att.get("fileName") or att["id"], self.attachment_url(course_pk, item["id"], att["id"]))
+                 for att in self.attachments(course_pk, item["id"])]
+        files += [(ln["text"], ln["url"]) for ln in body_links(item.get("body"), self.s.base_url)
+                  if ln["blackboard_file"] and not ln.get("inline_image")]
+        return files
 
     # -- deadlines --------------------------------------------------------
     def gradebook_columns(self, course_pk: str) -> list[dict]:
