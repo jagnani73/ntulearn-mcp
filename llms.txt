@@ -1,17 +1,13 @@
-# blackboard-mcp
+# NTULearn MCP
 
-> Open-source MCP (Model Context Protocol) server for Blackboard Learn (Ultra). It gives AI assistants (Claude Desktop, Claude Code, ChatGPT Codex CLI, Cursor, VS Code, SlideMate) read-only access to a student's Blackboard courses, content, deadlines and announcements, and downloads this year's lecture slides. Uses Blackboard's REST API with the user's own browser session after university SSO + MFA sign-in; no API key or developer account needed. Works at Imperial College London (bb.imperial.ac.uk), Edinburgh (www.learn.ed.ac.uk), Bristol (www.ole.bris.ac.uk), Leeds, Sheffield, Southampton, York and any Blackboard Learn site via BB_BASE_URL. Python, MIT licence.
+> Read-only MCP (Model Context Protocol) server for NTULearn, NTU Singapore's Blackboard Learn (Ultra). MCP clients such as Claude Code, Claude Desktop and Cursor can list a student's courses, browse content, read course files as text (pptx with speaker notes, pdf, docx, xlsx), see deadlines, announcements and grades, and sync course files to disk. Sign-in goes through NTU's SSO and MFA in a real browser window, with no API key. Forked from Mattlo0546/blackboard-mcp. Python, MIT licence.
 
 ## Docs
-- [README](https://github.com/Mattlo0546/blackboard-mcp/blob/main/README.md): install, client configs, tools, universities, FAQ
+- [README](README.md): setup, client config, tools, settings, privacy
+- [CLAUDE.md](CLAUDE.md): code layout and NTULearn behaviour checked against the live site
 
 ## Tools
-- bb_login, bb_status, bb_courses, bb_browse, bb_download, bb_upcoming, bb_announcements, bb_sync / bb_sync_status
+- bb_login, bb_status, bb_courses, bb_browse, bb_read, bb_download, bb_upcoming, bb_announcements, bb_grades, bb_sync / bb_sync_status, bb_set_courses
 
-## Install
-- `uv tool install --managed-python https://github.com/Mattlo0546/blackboard-mcp/archive/refs/heads/main.zip`, then `BB_BASE_URL=<your blackboard> blackboard-mcp login`; run with `blackboard-mcp serve` (stdio)
-
-## Related
-- [canvas-mcp](https://github.com/Mattlo0546/canvas-mcp): Canvas LMS
-- [moodle-mcp](https://github.com/Mattlo0546/moodle-mcp): Moodle (UCL, King's, LSE)
-- [SlideMate](https://github.com/Mattlo0546/slidemate): Mac app that installs these in one click
+## Upstream
+- [blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp): the generic Blackboard Learn server this fork is based on

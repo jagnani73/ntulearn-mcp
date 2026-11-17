@@ -1,158 +1,137 @@
-# Blackboard MCP Server: Blackboard Learn for Claude, ChatGPT Codex and Cursor
+# NTULearn MCP
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2)](https://modelcontextprotocol.io)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-[![M8ven Score](https://m8ven.ai/badge/mcp/mattlo0546-blackboard-mcp-w5zm3b?v=ca99a9aef024e25f665f1a7a0cea48a5)](https://m8ven.ai/mcp/mattlo0546-blackboard-mcp-w5zm3b?s=readme)
 
-**blackboard-mcp** is an open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for
-**Blackboard Learn** (Ultra). It lets AI assistants (Claude Desktop, Claude Code, ChatGPT Codex, Cursor, VS Code and
-[SlideMate](https://github.com/Mattlo0546/slidemate)) read a student's Blackboard courses, content, deadlines and
-announcements. It can also **download this year's lecture slides and readings** into one folder per course.
+A read-only [MCP](https://modelcontextprotocol.io) server for **NTULearn**, NTU Singapore's Blackboard Learn
+(Ultra). Claude Code, Claude Desktop, Cursor or any other MCP client can use it to list your courses, browse and read
+course files, check deadlines, announcements and grades, and sync a semester's material to disk.
 
-- **Works at any university that uses Blackboard**, including Imperial College London, Edinburgh, Bristol, Leeds
-  and Southampton ([list](#universities-that-use-blackboard)). Set `BB_BASE_URL` to yours.
-- **No API key needed.** It uses Blackboard's REST API with your own browser session. You sign in through your
-  university's normal SSO and MFA in a real browser window.
-- **Read-only.** It can't submit work, post or change anything on Blackboard.
+It's a fork of [Mattlo0546/blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp), which already had the
+hard part working: signing in through the university's SSO and MFA in a real browser window, with no API key and no
+cookie copying. The fork adds what NTU needed:
 
-> Using Canvas or Moodle instead? See [canvas-mcp](https://github.com/Mattlo0546/canvas-mcp) (Oxford, Harvard,
-> Stanford…) and [moodle-mcp](https://github.com/Mattlo0546/moodle-mcp) (UCL, King's, LSE, Cambridge…).
+- `bb_read` returns the text of course files without saving them: slides with speaker notes, PDFs, Word, Excel
+  and code. The extractors are adapted from [kingdonkatsu/ntulearn-mcp](https://github.com/kingdonkatsu/ntulearn-mcp).
+- `bb_grades` lists every gradebook item with points possible, due date, status and feedback.
+- Sync works on NTU courses. Upstream synced PDFs only, and NTU lecturers mostly upload `.pptx`, so sync now takes
+  slides, documents, spreadsheets, notebooks, archives and code. It also files NTU's `W1`, `W2` folders under
+  `Week 01`, `Week 02`.
+- Session cookies stay on NTULearn. File downloads redirect to Blackboard's separate file host
+  (`alt-….blackboard.com`), and upstream sent your session cookies there too. Each cookie is now scoped to its own
+  domain and path.
+- Downloads work on Windows. Long course names used to be cut off with a trailing space, which Windows won't
+  accept in a folder name.
+- Course names are shorter: `AY2627-T2-SC6106-BLOCKCHAIN DEVELOPMENT FUNDAMENTALS - PART 1` becomes
+  `SC6106 BLOCKCHAIN DEVELOPMENT FUNDAMENTALS - PART 1`, in tool output and in folder names.
 
-## What you can ask
+Lecture recordings aren't covered yet. The course Media Gallery is a separate Kaltura site (see
+[Roadmap](#roadmap)).
 
-- *"What's due on Blackboard in the next three weeks?"*
-- *"Any new announcements in my courses?"*
-- *"Download this year's lecture slides."*
+## Setup
 
-## Install
-
-**With SlideMate:** Settings → **Your university** → pick your university (or Blackboard and your address) → **Connect**. SlideMate
-installs this, opens the sign-in window, and pulls your slides. Nothing else to do.
-
-**By hand (macOS, one command).** It installs [uv](https://docs.astral.sh/uv/) (which brings its own Python), then
-this, then opens Chrome so you can sign in once. Replace the address with your university's:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh && ~/.local/bin/uv tool install --managed-python https://github.com/Mattlo0546/blackboard-mcp/archive/refs/heads/main.zip && BB_BASE_URL=https://www.ole.bris.ac.uk ~/.local/bin/blackboard-mcp login
-```
-
-Then add it to your MCP client with the same `BB_BASE_URL` in its environment:
+You need [uv](https://docs.astral.sh/uv/) and Google Chrome.
 
 ```bash
-claude mcp add blackboard -e BB_BASE_URL=https://www.ole.bris.ac.uk -- ~/.local/bin/blackboard-mcp serve
+git clone <this repo> ntulearn-mcp && cd ntulearn-mcp
+uv sync
+uv tool install --editable .        # puts `blackboard-mcp` on your PATH, running this checkout
 ```
+
+Sign in once. A Chrome window opens on NTULearn; finish the NTU sign-in and MFA there. It uses its own browser
+profile, separate from your everyday Chrome.
+
+```bash
+BB_MCP_HOME=/path/to/ntulearn-mcp/.bb-home blackboard-mcp login
+```
+
+Then add it to your MCP client with the same `BB_MCP_HOME`. For Claude Code:
+
+```bash
+claude mcp add ntulearn -s user \
+  -e BB_MCP_HOME=/path/to/ntulearn-mcp/.bb-home \
+  -e BB_DOWNLOAD_DIR=/path/to/ntulearn-mcp/downloads \
+  -- blackboard-mcp serve
+```
+
+Claude Desktop and Cursor take the same command, args (`["serve"]`) and `env` in their JSON config.
+
+When the session expires, tools answer with `login_required`. The server first tries to refresh it silently
+using the saved browser profile, and if that fails, `bb_login` opens the window again.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
-| `bb_login` | Opens a browser for the university sign-in and saves the session. Tries a silent refresh first. |
-| `bb_status` | Who you're signed in as, which site, where files download to, last sync |
+| `bb_login` | Signs in through a browser window. Tries a silent refresh first. |
+| `bb_status` | Who you're signed in as, where files download to, when the last sync ran |
 | `bb_courses` | This year's courses (`include_all` for every course and organisation) |
-| `bb_browse` | A course's content (or one folder's): titles, text, links, grade columns |
-| `bb_download` | Every file in one content item |
-| `bb_upcoming` | Due dates in the next N days (default 21) |
-| `bb_announcements` | Recent announcements, for one course or all of this year's |
-| `bb_sync` / `bb_sync_status` | Download the PDFs from this year's courses (or the ones named), in the background |
-| `bb_set_courses` | Change which courses a full sync pulls (`include` an info site it skips, `exclude` a course) |
+| `bb_browse` | A course's content, or one folder's: titles, types, text, links, grade columns |
+| `bb_read` | The text of one item's files (pptx with speaker notes, pdf, docx, xlsx, text and code), paged with `offset` |
+| `bb_download` | Saves every file on one content item |
+| `bb_upcoming` | Due dates from the Blackboard calendar for the next N days (default 21) |
+| `bb_announcements` | Recent announcements, for one course or all current ones |
+| `bb_grades` | Gradebook items with points possible, due date, your score, status and feedback |
+| `bb_sync` / `bb_sync_status` | Downloads study files from this year's courses in the background. Only new or changed files are fetched. |
+| `bb_set_courses` | Changes which courses a full sync pulls |
 
-**This year's courses:** students stay enrolled in years of old courses, so a sync only takes courses whose end date is
-still ahead, or (as Blackboard rarely sets end dates) that were created within about 9 months of your newest course.
-Files land in `<folder>/<course>/<Week NN or top-level folder>/`, and only new or changed ones are downloaded.
+Things that are useful to know on NTULearn:
 
-**Only what you study:** a full sync skips sites that aren't courses (faculty hubs, guidance and induction sites,
-library skills) and, inside courses, posters, handbooks, forms, timetables and support pages. Its report lists the
-sites it skipped; `bb_set_courses` brings one back. Words that are also lecture topics only count in an admin phrase,
-so "Mathematical induction" stays and "Induction week schedule" goes ([`relevance.py`](blackboard_mcp/relevance.py)).
+- Many quiz and project deadlines are only written in the item title ("Week 3 Quiz (due end of week 5 Sunday
+  2359)") and never reach the calendar, so `bb_upcoming` misses them. `bb_grades` lists those items, titles
+  included.
+- `bb_sync` skips sites that aren't courses (the academic integrity module, for example) and files that aren't for
+  studying, like posters, handbooks and forms. `bb_set_courses` brings a skipped course back.
 
-## Connect it to your AI app
+## Settings
 
-### Claude Desktop
-
-Settings → Developer → Edit Config (`claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "blackboard": {
-      "command": "/Users/YOU/.local/bin/blackboard-mcp",
-      "args": ["serve"],
-      "env": { "BB_BASE_URL": "https://bb.imperial.ac.uk" }
-    }
-  }
-}
-```
-
-The same block works in Cursor (`~/.cursor/mcp.json`). VS Code's `.vscode/mcp.json` uses `"servers"` in place of
-`"mcpServers"`.
-
-### ChatGPT Codex CLI
-
-```bash
-codex mcp add blackboard --env BB_BASE_URL=https://bb.imperial.ac.uk -- ~/.local/bin/blackboard-mcp serve
-```
-
-## Universities that use Blackboard
-
-These addresses were checked to be Blackboard Learn sites:
-
-| University | `BB_BASE_URL` |
-| --- | --- |
-| Imperial College London | `bb.imperial.ac.uk` |
-| University of Edinburgh (Learn) | `www.learn.ed.ac.uk` |
-| University of Bristol | `www.ole.bris.ac.uk` |
-| University of Leeds (Minerva) | `minerva.leeds.ac.uk` |
-| University of Sheffield | `vle.shef.ac.uk` |
-| University of Southampton | `blackboard.soton.ac.uk` |
-| University of York (Yorkshare) | `vle.york.ac.uk` |
-
-Your university's address is the one in your browser's address bar when you open Blackboard. If its landing page has
-an unusual sign-in button, set `BB_SSO_BUTTON` to that button's text.
-
-## Settings (all optional except the address)
-
-Environment variables win over `~/.blackboard-mcp/config.json`.
+All optional. Environment variables override `<BB_MCP_HOME>/config.json`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `BB_BASE_URL` | none | Your university's Blackboard address |
-| `BB_DOWNLOAD_DIR` | SlideMate's first slides folder, else `~/BlackboardFiles` | Where synced files go |
+| `BB_BASE_URL` | `https://ntulearn.ntu.edu.sg` | Blackboard address. Any other Blackboard Learn site works too. |
+| `BB_MCP_HOME` | `~/.blackboard-mcp` | Session cookies, the sign-in browser profile and sync state |
+| `BB_DOWNLOAD_DIR` | `~/BlackboardFiles` | Where downloads and syncs go: `<course>/<Week NN or folder>/<file>` |
 | `BB_BROWSER_CHANNEL` | `chrome` | Browser for sign-in; `""` uses Playwright's own Chromium |
-| `BB_SSO_BUTTON` | a few common ones | Text of the button that starts single sign-on on your Blackboard's landing page |
-| `BB_MCP_HOME` | `~/.blackboard-mcp` | Where the session cookies, sign-in browser profile and sync state live |
-
-## FAQ
-
-**Is there an MCP server for Imperial's or Edinburgh's Blackboard?**
-Yes, this one. Set `BB_BASE_URL` to `bb.imperial.ac.uk` or `www.learn.ed.ac.uk`. In SlideMate, pick the university
-from the list.
-
-**Do I need a Blackboard API key or developer account?**
-No. It uses the same REST API the Blackboard website uses, with your own signed-in session.
-
-**Does it work with ChatGPT?**
-It works with OpenAI's Codex CLI and with any app that supports local (stdio) MCP servers. The ChatGPT website can
-only use remote MCP servers.
+| `BB_SSO_BUTTON` | a few common labels | Text of the landing-page button that starts SSO, if the silent refresh needs one |
 
 ## Privacy
 
-- **Access:** read-only. It can't submit work, post or change anything on Blackboard.
-- **Storage:** the session cookies stay on your computer (`~/.blackboard-mcp/cookies.json`, readable only by you).
-  Delete the folder to sign out. Data goes directly between your computer and your university's Blackboard.
+- It's read-only. It only makes GET requests and can't submit, post or change anything on NTULearn.
+- Your session lives in `BB_MCP_HOME`. `cookies.json` holds it in plain text (Windows ignores the `chmod 600`),
+  and `browser-profile/` holds the sign-in browser's state. Anyone who can read that folder can act as you on
+  NTULearn until the session expires. Delete the folder to sign out.
+- Cookies only go to `ntulearn.ntu.edu.sg`. Downloads still work when the redirect lands on Blackboard's file
+  host, because that host doesn't need them.
+- Requests carry a `blackboard-mcp/0.1` user agent, so NTU's logs can tell them apart from a browser.
+- Your MCP client sees whatever the tools return. Course content, announcements and grades go to the model
+  provider like any other tool result.
+
+Using your session this way may not fit NTU's IT acceptable use policy. That's your call.
+
+## Roadmap
+
+Lecture recordings and their captions, from the course Media Gallery. The gallery is NTU's Kaltura MediaSpace,
+opened through an LTI launch from the course (`x-bb-bltiplacement-NewUCVGalleryLTI_1_1` in `bb_browse`). The
+Kaltura side is already worked out in
+[ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder). What's still
+open is getting a Kaltura session from the Playwright browser through that launch.
 
 ## Development
 
 ```bash
-uv run --with pytest pytest     # offline tests: which courses count as this year's, file layout, MCP over stdio
+uv sync
+uv run --with pytest pytest     # upstream's offline tests
 ```
 
-## Related
+`git remote` has `upstream` pointing at Mattlo0546/blackboard-mcp. See [CLAUDE.md](CLAUDE.md) for how the code is
+laid out and what was verified against the live NTULearn.
 
-- [canvas-mcp](https://github.com/Mattlo0546/canvas-mcp): MCP server for Canvas LMS
-- [moodle-mcp](https://github.com/Mattlo0546/moodle-mcp): MCP server for Moodle
-- [classroom-mcp](https://github.com/Mattlo0546/classroom-mcp): MCP server for Google Classroom
-- [SlideMate](https://github.com/Mattlo0546/slidemate): a free Mac app with an AI tutor that has read your whole
-  lecture deck. It sets all of these up in one click.
+## Credits
 
-MIT licensed. Not affiliated with Anthology Inc. or any university. Blackboard is a trademark of Anthology Inc.
+- [Mattlo0546/blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp) (MIT): the base of this fork
+- [kingdonkatsu/ntulearn-mcp](https://github.com/kingdonkatsu/ntulearn-mcp) (MIT): the file text extractors in
+  `blackboard_mcp/extract.py`
+
+Not affiliated with NTU or Blackboard. MIT licence; see [LICENSE](LICENSE).
