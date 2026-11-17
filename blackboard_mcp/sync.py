@@ -1,6 +1,6 @@
-"""Download the PDFs (lecture slides, readings, worksheets) from your current Blackboard courses.
+"""Download the study files (slides, readings, worksheets, notebooks) from your current Blackboard courses.
 
-Layout: <download folder>/<course>/<Week NN or top-level folder>/<file>.pdf. Each file is fetched once: the
+Layout: <download folder>/<course>/<Week NN or top-level folder>/<file>. Each file is fetched once: the
 item's "modified" time is remembered, so later syncs only download what's new or changed. Pages that are
 noise for studying (welcome, help, forums, recordings) are skipped, and so are sites that aren't courses and files
 that aren't for studying, such as posters, handbooks and forms (relevance.py).
@@ -21,6 +21,9 @@ from .bb import DOC_BODY, Blackboard, Course, body_links, handler_id, parse_dt
 from .config import Settings
 
 FOLDERISH = {"x-bb-folder", "x-bb-lesson", "x-bb-module-page"}
+# What a sync downloads. NTU lecturers mostly post .pptx, not PDFs; code and notebooks matter for SC courses.
+STUDY_EXTS = (".pdf", ".ppt", ".pptx", ".pps", ".ppsx", ".doc", ".docx", ".rtf", ".odt", ".odp", ".xls", ".xlsx",
+              ".csv", ".txt", ".md", ".ipynb", ".zip", ".sol", ".py")
 NOISE = re.compile(r"welcome|help for students|help and support|contacts?\b|communication|re/?play|panopto|echo ?360|"
                    r"discussion|general questions|forum|student (support|voice)|announcements?", re.I)
 WEEK = [re.compile(r"(?<![a-z])week[\s_:-]*(\d{1,2})(?!\d)", re.I),
@@ -115,7 +118,7 @@ class Syncer:
         new = sum(r["downloaded"] for r in reports)
         errors = [f"{r['course']}: {e}" for r in reports for e in r["errors"]]
         where = str(self.s.download_dir).replace(str(Path.home()), "~", 1)
-        summary = (f"{new} new PDF{'s' if new != 1 else ''} from {len(courses)} course{'s' if len(courses) != 1 else ''}"
+        summary = (f"{new} new file{'s' if new != 1 else ''} from {len(courses)} course{'s' if len(courses) != 1 else ''}"
                    f" into {where}" + (f" ({len(errors)} couldn't be downloaded)" if errors else "") + "."
                    + (f" Skipped {len(passed)} site{'s' if len(passed) != 1 else ''} that aren't courses"
                       f" ({', '.join(p['name'] for p in passed[:3])}{'…' if len(passed) > 3 else ''})." if passed else ""))
@@ -158,11 +161,11 @@ class Syncer:
                 "not_study": noise, "files": downloaded, "errors": errors}
 
     def files(self, c: Course, item: dict):
-        """(state key, file name, download URL) for each PDF attached to or embedded in an item."""
+        """(state key, file name, download URL) for each study file attached to or embedded in an item."""
         seen = set()
         for att in self.bb.attachments(c.id, item["id"]):
             name = safe(att.get("fileName") or item.get("title") or "file", 120)
-            if name.lower().endswith(".pdf") and name not in seen:
+            if name.lower().endswith(STUDY_EXTS) and name not in seen:
                 seen.add(name)
                 yield f"{c.id}:{item['id']}:{att['id']}", name, self.bb.attachment_url(c.id, item["id"], att["id"])
         for ln in body_links(item.get("body"), self.s.base_url):
@@ -171,6 +174,6 @@ class Syncer:
             name = safe(ln["text"], 120)
             if "." not in name[-6:]:
                 name += Path(ln["url"].split("?")[0]).suffix
-            if name.lower().endswith(".pdf") and name not in seen:
+            if name.lower().endswith(STUDY_EXTS) and name not in seen:
                 seen.add(name)
                 yield f"{c.id}:{item['id']}:{hashlib.sha1(ln['url'].encode()).hexdigest()[:12]}", name, ln["url"]

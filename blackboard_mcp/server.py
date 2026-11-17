@@ -246,7 +246,8 @@ def _sync_worker(courses):
 
 @mcp.tool()
 async def bb_sync(courses: list[str] | None = None, wait_seconds: int = 20) -> dict:
-    """Download the PDFs (slides, readings, worksheets) from every current course, or just `courses`, into
+    """Download the study files (slides, PDFs, readings, worksheets, notebooks, code) from every current course,
+    or just `courses`, into
     <download folder>/<course>/<week>/ (SlideMate's library if it's set up). Only new or changed files are
     fetched. Runs in the background: if it isn't done within wait_seconds, call bb_sync_status."""
     with _job_lock:

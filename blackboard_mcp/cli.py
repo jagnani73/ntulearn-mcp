@@ -13,7 +13,7 @@ def main() -> None:
     sp.add_argument("--timeout", type=int, default=300)
     sub.add_parser("status", help="who you're signed in as")
     sub.add_parser("courses", help="your current courses")
-    sp = sub.add_parser("sync", help="download PDFs from every current course (or the ones named)")
+    sp = sub.add_parser("sync", help="download study files from every current course (or the ones named)")
     sp.add_argument("courses", nargs="*")
     sub.add_parser("serve", help="run the MCP server on stdio (the default)")
     args = p.parse_args()
