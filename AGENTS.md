@@ -97,8 +97,9 @@ Don't add tests unless asked. Check changes by running them against NTULearn.
 
 `bb_recordings` and `bb_transcript` go through `server._with_gallery`, which keeps one `kaltura.Gallery` per course
 for three hours and relaunches once if Kaltura rejects the session. Opening a gallery (`kaltura.open_gallery`) takes
-about 30 seconds and runs headless under `auth.PROFILE_LOCK`, since Chrome allows one process per profile. Verified
-on SC6106 and SC6104 on 2026-11-17:
+about 30 seconds and runs headless under `auth.profile_lock`. Chrome allows one process per profile, and each MCP
+client runs its own server process, so that lock is a file in `BB_MCP_HOME` (`browser.lock`) held across processes;
+sign-in takes it too. Verified on SC6106 and SC6104 on 2026-11-17:
 
 1. `Blackboard.media_gallery` finds the gallery item and reads its launch link from the **private** API
    (`/learn/api/v1/courses/{id}/contents/{id}` → `contentDetail[handler].launchLink`, e.g.

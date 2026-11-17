@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .auth import PROFILE_LOCK, LoginRequired, _launch, load_cookies
+from .auth import LoginRequired, _launch, load_cookies, profile_lock
 from .config import Settings
 
 SERVICE_URL = "https://api.sg.kaltura.com"
@@ -110,7 +110,7 @@ def open_gallery(settings: Settings, launch_path: str, kaf_host: str, timeout_s:
     Kaltura API needs: the lecture entry IDs on the gallery page and a usable user session."""
     from playwright.sync_api import sync_playwright
 
-    with PROFILE_LOCK, sync_playwright() as pw:
+    with profile_lock(settings), sync_playwright() as pw:
         ctx = _launch(pw, settings, headless=True)
         try:
             # The persistent profile may have dropped Blackboard's session cookies; the saved ones are current.

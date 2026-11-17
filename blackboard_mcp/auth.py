@@ -9,14 +9,70 @@ keep the resulting session cookies. The same browser profile remembers the SSO
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .config import Settings
 
-# Chrome allows one process per profile directory; sign-in and the Media Gallery launch share this one.
-PROFILE_LOCK = threading.RLock()
+_profile_thread_lock = threading.RLock()
+_profile_depth = 0
+_profile_file = None
+
+
+@contextmanager
+def profile_lock(settings: Settings, wait_s: float = 120):
+    """Hold the sign-in browser profile. Chrome allows one process per profile directory, and every MCP client
+    (Claude Code, Cursor, Claude Desktop…) starts its own server process, so this is a lock file in BB_MCP_HOME
+    that holds across processes, not only threads. The OS drops it if a process dies. Re-entrant per process."""
+    global _profile_depth, _profile_file
+    with _profile_thread_lock:
+        if _profile_depth == 0:
+            _profile_file = _lock_file(settings.home / "browser.lock", wait_s)
+        _profile_depth += 1
+        try:
+            yield
+        finally:
+            _profile_depth -= 1
+            if _profile_depth == 0:
+                _unlock_file(_profile_file)
+                _profile_file = None
+
+
+def _lock_file(path: Path, wait_s: float):
+    fh = open(path, "a+b")
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fh
+        except OSError:
+            if time.time() > deadline:
+                fh.close()
+                raise TimeoutError("Another app is using the NTULearn sign-in browser right now. Try again in a "
+                                   "minute.") from None
+            time.sleep(0.5)
+
+
+def _unlock_file(fh) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    finally:
+        fh.close()
 
 SESSION_COOKIES = ("BbRouter", "JSESSIONID", "AWSELB", "AWSELBCORS", "BbClientCalenderTimeZone")
 # Some Blackboard landing pages don't redirect to single sign-on by themselves; one of these buttons starts it.
@@ -90,7 +146,7 @@ def browser_login(settings: Settings, *, headless: bool = False, timeout_s: int 
         return {"ok": False, "reason": "Set your Blackboard address first (BB_BASE_URL, e.g. https://learn.example.ac.uk)."}
     host = _host(settings)
     deadline = time.time() + (45 if headless else timeout_s)
-    with PROFILE_LOCK, sync_playwright() as pw:
+    with profile_lock(settings, wait_s=timeout_s), sync_playwright() as pw:
         ctx = _launch(pw, settings, headless)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
