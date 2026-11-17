@@ -74,7 +74,10 @@ def body_links(html: str | None, base_url: str) -> list[dict]:
             if href in seen:
                 continue
             seen.add(href)
-            internal = "bbcswebdav" in href or "/bbcswebdav/" in href
+            # Only NTULearn's own file store counts. A link elsewhere that merely mentions bbcswebdav (planted in
+            # course content, say) must never be fetched from the student's machine.
+            u = urlparse(href)
+            internal = u.hostname == urlparse(base_url).hostname and u.path.startswith("/bbcswebdav/")
             name, is_image = None, tag == "img"
             if el.get("data-bbfile"):
                 try:
@@ -134,6 +137,11 @@ class Blackboard:
 
     # -- low level -------------------------------------------------------
     def _request(self, method: str, url: str, *, stream: bool = False, retry_auth: bool = True, **kw) -> httpx.Response:
+        # Every request starts on the Blackboard host. Redirects Blackboard itself issues (file downloads end on
+        # alt-*.blackboard.com) are followed inside httpx and aren't affected.
+        host = urlparse(url).hostname
+        if host and host != urlparse(self.s.base_url).hostname:
+            raise PermissionError(f"refusing to fetch {host}: only {self.s.base_url} is allowed")
         if not self._client.cookies:
             if not (self._refresher and self._refresher(self.s)):
                 raise LoginRequired()

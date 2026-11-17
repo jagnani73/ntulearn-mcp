@@ -9,6 +9,8 @@ fork's changes.
 - Never print, log or commit anything from `.bb-home/` (`cookies.json` is a live NTULearn session) or a Kaltura
   session token.
 - The server is read-only. Don't add anything that submits, posts or changes data on NTULearn or Kaltura.
+- Links in course content are untrusted. Every Blackboard request starts on the NTULearn host
+  (`Blackboard._request` refuses others), and only `/bbcswebdav/` links on that host count as files. Keep both.
 - Don't write tests unless asked. Check a change by running the tools against the live NTULearn (see "Running and
   checking changes").
 - Work on the `ntulearn` branch. `main` mirrors upstream.
