@@ -18,6 +18,9 @@ from .config import Settings
 
 # A unit code inside a course id or name, e.g. PHIL20069 in "PHIL20069_2026_TB-1" (Bristol) or EC100 / MY452.
 UNIT_CODE = re.compile(r"(?<![A-Z0-9])([A-Z]{2,5}\d{3,5})(?!\d)")
+# NTU course names lead with the academic year and term: "AY2627-T2-SC6106-BLOCKCHAIN …",
+# "AY2627-T2-Aug(T)-SC6131-…". Everything before the course code is dropped from short names.
+NTU_TERM_PREFIX = re.compile(r"^AY\d{4}-T\d+-(?:[^-]+-)*?(?=[A-Z]{2,5}\d{3,5}-)")
 API = "/learn/api/public"
 
 
@@ -99,6 +102,9 @@ class Course:
 
     def short_name(self) -> str:
         name = " ".join(self.name.split())
+        m = NTU_TERM_PREFIX.match(name) if self.code else None
+        if m:
+            return name[m.end():].replace(f"{self.code}-", f"{self.code} ", 1)
         return name if not self.code or self.code in name else f"{self.code} {name}"
 
 
