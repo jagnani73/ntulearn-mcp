@@ -1,6 +1,7 @@
 """MCP server exposing a Blackboard Learn (Ultra) site to AI tools."""
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -9,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import anyio
 from mcp.server.fastmcp import FastMCP
 
-from . import extract
+from . import extract, kaltura
 from .auth import LoginRequired, browser_login
 from .bb import Blackboard, body_links, handler_id, html_to_text, parse_dt
 from .config import load_settings
@@ -21,7 +22,8 @@ mcp = FastMCP(
         "Tools for the student's Blackboard (Ultra), by default NTU's NTULearn. bb_courses lists current courses; "
         "bb_browse shows a course's content; bb_read returns a file's text (slides with speaker notes, PDFs, Word, "
         "Excel) without saving it; bb_upcoming lists due dates; bb_announcements shows recent announcements; "
-        "bb_grades shows the gradebook; bb_download saves one item's files; bb_sync downloads every current course's "
+        "bb_grades shows the gradebook; bb_recordings lists a course's lecture recordings and bb_transcript returns one "
+        "as timestamped text; bb_download saves one item's files; bb_sync downloads every current course's "
         "study files, skipping sites that aren't courses and posters, handbooks and forms (check bb_sync_status; "
         "bb_set_courses changes which courses it pulls). If any tool reports that sign-in is needed, call bb_login, "
         "which opens a browser window for the university sign-in."
@@ -34,6 +36,56 @@ _job_lock = threading.Lock()
 # Extracted text of recently read items, so paging through a long deck with bb_read doesn't re-download it.
 _read_cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 READ_CACHE_SIZE, READ_CACHE_TTL = 8, 600
+# Media Gallery sessions per course. Opening one replays the LTI launch in a hidden browser (~20 s).
+_galleries: dict[str, kaltura.Gallery] = {}
+_gallery_lock = threading.Lock()
+GALLERY_TTL = 3 * 3600
+
+
+def _cache_put(key: tuple, doc: dict) -> None:
+    _read_cache[key] = (time.time(), doc)
+    while len(_read_cache) > READ_CACHE_SIZE:
+        _read_cache.popitem(last=False)
+
+
+def _cache_get(key: tuple) -> dict | None:
+    hit = _read_cache.get(key)
+    if hit and time.time() - hit[0] < READ_CACHE_TTL:
+        _read_cache.move_to_end(key)
+        return hit[1]
+    return None
+
+
+def _with_gallery(bb: Blackboard, course_pk: str, fn):
+    """fn(gallery) for the course's Media Gallery: a recent session if there is one, otherwise a fresh launch, and
+    one fresh launch more if Kaltura turns the cached session down."""
+    for attempt in (0, 1):
+        with _gallery_lock:
+            g = _galleries.get(course_pk)
+            if attempt or not g or time.time() - g.opened > GALLERY_TTL:
+                g = _galleries[course_pk] = kaltura.open_gallery(_settings, *bb.media_gallery(course_pk))
+        try:
+            return fn(g)
+        except kaltura.KalturaError as e:
+            if attempt or not e.session_problem:
+                raise ValueError(str(e)) from e
+    raise AssertionError("unreachable")
+
+
+def _pick_recording(entries: list[dict], query: str) -> dict:
+    q = query.strip()
+    for e in entries:
+        if e["id"] == q or (e.get("name") or "").strip().lower() == q.lower():
+            return e
+    # Whole-word match, so "Session 1" doesn't also pick "Session 10".
+    pat = re.compile(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])", re.I)
+    hits = [e for e in entries if pat.search(e.get("name") or "")]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise ValueError(f"No recording matches '{query}'. bb_recordings lists them.")
+    raise ValueError(f"'{query}' matches {len(hits)} recordings ({'; '.join(e.get('name') or e['id'] for e in hits)}). "
+                     "Pass the id or more of the title.")
 
 
 def _bb() -> Blackboard:
@@ -167,11 +219,8 @@ async def bb_read(course: str, content_id: str, file: str | None = None, offset:
         bb = _bb()
         c = bb.find_course(course)
         key = (c.id, content_id, (file or "").lower())
-        hit = _read_cache.get(key)
-        if hit and time.time() - hit[0] < READ_CACHE_TTL:
-            doc = hit[1]
-            _read_cache.move_to_end(key)
-        else:
+        doc = _cache_get(key)
+        if doc is None:
             item, files = bb.content_files(c.id, content_id)
             if file:
                 files = [f for f in files if file.lower() in f[0].lower()]
@@ -189,9 +238,7 @@ async def bb_read(course: str, content_id: str, file: str | None = None, offset:
                 if res.get("text"):
                     parts.append(f"# {name}\n\n{res['text']}")
             doc = {"title": item.get("title"), "files": meta, "text": "\n\n".join(parts)}
-            _read_cache[key] = (time.time(), doc)
-            while len(_read_cache) > READ_CACHE_SIZE:
-                _read_cache.popitem(last=False)
+            _cache_put(key, doc)
         text, start = doc["text"], max(0, offset)
         end = min(len(text), start + min(max(max_chars, 1000), 100_000))
         return {"course": c.short_name(), "title": doc["title"], "files": doc["files"], "total_chars": len(text),
@@ -228,6 +275,65 @@ async def bb_grades(course: str | None = None) -> dict:
                     "feedback": html_to_text(g.get("feedback"))[:800] or None, "content_id": col.get("contentId"),
                 })
         return {"grades": rows, "no_gradebook": empty}
+    return await _run(go)
+
+
+@mcp.tool()
+async def bb_recordings(course: str) -> dict:
+    """Lecture recordings in a course's Media Gallery (Kaltura): title, length, when it was recorded, caption
+    languages, and the second stream of dual-stream recordings. The first call for a course opens the gallery in a
+    hidden browser, which takes around 20 seconds. Read one with bb_transcript."""
+    def go():
+        bb = _bb()
+        c = bb.find_course(course)
+
+        def listing(g: kaltura.Gallery) -> list[dict]:
+            if not g.entry_ids:
+                return []
+            k = g.client()
+            entries = sorted(k.entries(g.entry_ids), key=lambda e: e.get("createdAt") or 0)
+            ids = [e["id"] for e in entries]
+            caps, second = k.captions(ids), k.second_streams(ids)
+            return [{
+                "id": e["id"], "title": e.get("name"), "length": kaltura.hms(e.get("duration")),
+                "recorded": datetime.fromtimestamp(e["createdAt"]).strftime("%Y-%m-%d %H:%M") if e.get("createdAt") else None,
+                "captions": sorted({x.get("language") or x.get("languageCode") or "?" for x in caps.get(e["id"], [])}),
+                "second_stream": second.get(e["id"]),
+            } for e in entries]
+        return {"course": c.short_name(), "recordings": _with_gallery(bb, c.id, listing)}
+    return await _run(go)
+
+
+@mcp.tool()
+async def bb_transcript(course: str, recording: str, offset: int = 0, max_chars: int = 30000) -> dict:
+    """The transcript of one lecture recording, built from its captions: paragraphs stamped with the time they
+    start ("[0:12:30] …"). `recording` is an id from bb_recordings or part of the title, e.g. "Session 2". Long
+    transcripts come back in pieces: call again with offset=next_offset for the rest."""
+    def go():
+        bb = _bb()
+        c = bb.find_course(course)
+
+        def fetch(g: kaltura.Gallery) -> tuple[dict, dict]:
+            k = g.client()
+            e = _pick_recording(k.entries(g.entry_ids), recording)
+            owner = e.get("parentEntryId") or e["id"]  # a second stream shares its parent's captions
+            doc = _cache_get(("transcript", owner))
+            if doc is None:
+                caps = k.captions([owner]).get(owner, [])
+                if not caps:
+                    raise ValueError(f"'{e.get('name')}' has no captions yet, so there's no transcript.")
+                cap = next((x for x in caps if x.get("isDefault")), None) or \
+                    next((x for x in caps if (x.get("languageCode") or "").startswith("en")), caps[0])
+                doc = {"language": cap.get("language") or cap.get("languageCode"),
+                       "text": kaltura.captions_to_text(k.caption_file(cap["id"]))}
+                _cache_put(("transcript", owner), doc)
+            return e, doc
+        e, doc = _with_gallery(bb, c.id, fetch)
+        text, start = doc["text"], max(0, offset)
+        end = min(len(text), start + min(max(max_chars, 1000), 100_000))
+        return {"course": c.short_name(), "recording": e.get("name"), "length": kaltura.hms(e.get("duration")),
+                "language": doc["language"], "total_chars": len(text), "offset": start,
+                "next_offset": end if end < len(text) else None, "text": text[start:end]}
     return await _run(go)
 
 

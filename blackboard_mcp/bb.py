@@ -238,6 +238,30 @@ class Blackboard:
             if item.get("hasChildren") and len(trail) < max_depth:
                 yield from self.walk(course_pk, item["id"], trail + (item.get("title") or "Untitled",), max_depth)
 
+    def media_gallery(self, course_pk: str) -> tuple[str, str]:
+        """(LTI launch path, Kaltura host) for the course's Media Gallery.
+
+        The public API only names the LTI placement; the launch link and the tool's host come from the private
+        content API that Ultra itself calls."""
+        def is_gallery(it: dict) -> bool:
+            h = handler_id(it)
+            return h.startswith("x-bb-bltiplacement-") and ("gallery" in h.lower()
+                                                            or "gallery" in (it.get("title") or "").lower())
+        item = next((it for it in self.contents(course_pk) if is_gallery(it)), None) or \
+            next((it for _, it in self.walk(course_pk, max_depth=1) if is_gallery(it)), None)
+        if not item:
+            raise ValueError("This course has no Media Gallery.")
+        handler = item["contentHandler"]["id"]
+        detail = (self.get(f"/learn/api/v1/courses/{course_pk}/contents/{item['id']}").get("contentDetail") or {})
+        d = detail.get(handler) or {}
+        placement = d.get("placement") or {}
+        launch = d.get("launchLink") or placement.get("launchLink")
+        host = (d.get("domainConfig") or {}).get("primaryDomain") or urlparse(placement.get("url") or "").hostname
+        if not launch or not host:
+            raise ValueError("Couldn't find the Media Gallery's launch link.")
+        # "wrapped" frames the tool inside Ultra's page chrome; the plain launch is what was verified.
+        return launch.replace("&wrapped=true", ""), host
+
     def attachments(self, course_pk: str, content_id: str) -> list[dict]:
         try:
             return list(self.paged(f"{API}/v1/courses/{course_pk}/contents/{content_id}/attachments"))

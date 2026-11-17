@@ -9,10 +9,14 @@ keep the resulting session cookies. The same browser profile remembers the SSO
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
 from .config import Settings
+
+# Chrome allows one process per profile directory; sign-in and the Media Gallery launch share this one.
+PROFILE_LOCK = threading.RLock()
 
 SESSION_COOKIES = ("BbRouter", "JSESSIONID", "AWSELB", "AWSELBCORS", "BbClientCalenderTimeZone")
 # Some Blackboard landing pages don't redirect to single sign-on by themselves; one of these buttons starts it.
@@ -86,7 +90,7 @@ def browser_login(settings: Settings, *, headless: bool = False, timeout_s: int 
         return {"ok": False, "reason": "Set your Blackboard address first (BB_BASE_URL, e.g. https://learn.example.ac.uk)."}
     host = _host(settings)
     deadline = time.time() + (45 if headless else timeout_s)
-    with sync_playwright() as pw:
+    with PROFILE_LOCK, sync_playwright() as pw:
         ctx = _launch(pw, settings, headless)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
