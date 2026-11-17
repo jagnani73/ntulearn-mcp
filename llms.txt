@@ -4,7 +4,7 @@
 
 ## Docs
 - [README](README.md): setup, client config, tools, settings, privacy
-- [CLAUDE.md](CLAUDE.md): code layout and NTULearn behaviour checked against the live site
+- [AGENTS.md](AGENTS.md): code layout and NTULearn behaviour checked against the live site
 
 ## Tools
 - bb_login, bb_status, bb_courses, bb_browse, bb_read, bb_download, bb_upcoming, bb_announcements, bb_grades, bb_recordings, bb_transcript, bb_sync / bb_sync_status, bb_set_courses

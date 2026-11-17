@@ -18,8 +18,8 @@ cookie copying. The fork adds what NTU needed:
 - `bb_grades` lists every gradebook item with points possible, due date, status and feedback.
 - `bb_recordings` and `bb_transcript` reach the course Media Gallery, which is Kaltura. They list a course's
   lecture recordings and turn one into text from its captions, with each paragraph stamped with the time it starts.
-  The Kaltura side follows what [ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder)
-  worked out.
+  The Kaltura side follows what the author's (private) ntulearn-media-gallery-downloader Chrome extension worked
+  out.
 - Sync works on NTU courses. Upstream synced PDFs only, and NTU lecturers mostly upload `.pptx`, so sync now takes
   slides, documents, spreadsheets, notebooks, archives and code. It also files NTU's `W1`, `W2` folders under
   `Week 01`, `Week 02`.
@@ -36,7 +36,7 @@ cookie copying. The fork adds what NTU needed:
 You need [uv](https://docs.astral.sh/uv/) and Google Chrome.
 
 ```bash
-git clone <this repo> ntulearn-mcp && cd ntulearn-mcp
+git clone -b ntulearn https://github.com/jagnani73/ntulearn-mcp && cd ntulearn-mcp
 uv sync
 uv tool install --editable .        # puts `blackboard-mcp` on your PATH, running this checkout
 ```
@@ -126,7 +126,7 @@ uv sync
 uv run --with pytest pytest     # upstream's offline tests
 ```
 
-`git remote` has `upstream` pointing at Mattlo0546/blackboard-mcp. See [CLAUDE.md](CLAUDE.md) for how the code is
+`git remote` has `upstream` pointing at Mattlo0546/blackboard-mcp. See [AGENTS.md](AGENTS.md) for how the code is
 laid out and what was verified against the live NTULearn.
 
 ## Credits
@@ -134,7 +134,7 @@ laid out and what was verified against the live NTULearn.
 - [Mattlo0546/blackboard-mcp](https://github.com/Mattlo0546/blackboard-mcp) (MIT): the base of this fork
 - [kingdonkatsu/ntulearn-mcp](https://github.com/kingdonkatsu/ntulearn-mcp) (MIT): the file text extractors in
   `blackboard_mcp/extract.py`
-- [ntulearn-media-gallery-downloader](https://github.com/jagnani73/ntulearn-media-gallery-downlaoder): the Kaltura
-  findings behind `blackboard_mcp/kaltura.py`
+- ntulearn-media-gallery-downloader (private Chrome extension, same author): the Kaltura findings behind
+  `blackboard_mcp/kaltura.py`
 
 Not affiliated with NTU or Blackboard. MIT licence; see [LICENSE](LICENSE).
