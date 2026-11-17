@@ -14,8 +14,8 @@ HOME_DIR = Path(os.environ.get("BB_MCP_HOME", Path.home() / ".blackboard-mcp")).
 
 @dataclass
 class Settings:
-    # Your university's Blackboard, e.g. https://www.ole.bris.ac.uk or https://learn.example.ac.uk
-    base_url: str = ""
+    # Your university's Blackboard. This fork targets NTU's NTULearn; set BB_BASE_URL for any other.
+    base_url: str = "https://ntulearn.ntu.edu.sg"
     # Where synced files land: <root>/<course>/<week or folder>/. Unless set, that's SlideMate's library (its
     # first slides folder), so synced slides show up there; without SlideMate, ~/BlackboardFiles.
     download_dir: Path | None = None

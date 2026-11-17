@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blackboard-mcp"
-version = "0.2.0"
-description = "MCP server for Blackboard Learn (Ultra): courses, deadlines, announcements and lecture-slide sync into SlideMate"
+version = "0.3.0"
+description = "MCP server for NTULearn (NTU's Blackboard Learn Ultra): courses, deadlines, announcements, grades, file reading and sync"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Mattlo0546/blackboard-mcp"
+Upstream = "https://github.com/Mattlo0546/blackboard-mcp"
 
 [project.scripts]
 blackboard-mcp = "blackboard_mcp.cli:main"
