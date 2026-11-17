@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from . import relevance
 from .auth import LoginRequired
@@ -177,4 +178,7 @@ class Syncer:
                 name += Path(ln["url"].split("?")[0]).suffix
             if name.lower().endswith(STUDY_EXTS) and name not in seen:
                 seen.add(name)
-                yield f"{c.id}:{item['id']}:{hashlib.sha1(ln['url'].encode()).hexdigest()[:12]}", name, ln["url"]
+                # Key by path only: Blackboard signs embedded-file links with a query string that changes on every
+                # request. The path carries the file's version (rid/xid), so a replaced file still gets a new key.
+                key = hashlib.sha1(urlsplit(ln["url"]).path.encode()).hexdigest()[:12]
+                yield f"{c.id}:{item['id']}:{key}", name, ln["url"]
