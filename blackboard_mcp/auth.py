@@ -36,15 +36,17 @@ class LoginRequired(RuntimeError):
         )
 
 
-def load_cookies(settings: Settings) -> dict[str, str]:
+def load_cookies(settings: Settings) -> list[dict]:
     p = settings.cookies_path
     if not p.exists():
-        return {}
+        return []
     try:
         data = json.loads(p.read_text())
     except json.JSONDecodeError:
-        return {}
-    return {c["name"]: c["value"] for c in data.get("cookies", [])}
+        return []
+    # Whole cookies, not name -> value: the domain keeps them off Blackboard's alternate file host
+    # (downloads redirect there), and the path keeps same-named cookies apart (NTU sets two JSESSIONIDs).
+    return data.get("cookies", [])
 
 
 def save_cookies(settings: Settings, cookies: list[dict]) -> None:

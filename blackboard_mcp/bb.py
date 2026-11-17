@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Iterator
-from urllib.parse import unquote, urljoin
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -111,8 +111,17 @@ class Blackboard:
         self._client = self._new_client()
         self._me: dict | None = None
 
+    def _jar(self) -> httpx.Cookies:
+        """The saved session, each cookie scoped to its own domain and path, so redirects to another host
+        (file downloads end on Blackboard's alt-*.blackboard.com) don't carry it."""
+        jar = httpx.Cookies()
+        host = urlparse(self.s.base_url).hostname or ""
+        for c in load_cookies(self.s):
+            jar.set(c["name"], c["value"], domain=c.get("domain") or host, path=c.get("path") or "/")
+        return jar
+
     def _new_client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.s.base_url, cookies=load_cookies(self.s), transport=self._transport,
+        return httpx.Client(base_url=self.s.base_url, cookies=self._jar(), transport=self._transport,
                             follow_redirects=True, timeout=httpx.Timeout(30, read=120),
                             headers={"Accept": "application/json", "User-Agent": "blackboard-mcp/0.1 (+https://github.com/Mattlo0546/blackboard-mcp)"})
 
