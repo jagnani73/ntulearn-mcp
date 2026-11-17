@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from http.cookiejar import Cookie
 from datetime import datetime, timedelta
 from typing import Any, Callable, Iterator
 from urllib.parse import unquote, urljoin, urlparse
@@ -43,6 +44,36 @@ def parse_dt(s: str | None) -> datetime | None:
         return None
 
 
+def same_origin(url: str, base_url: str) -> bool:
+    """Same scheme, host and port as the Blackboard site. The hostname alone isn't enough: an http:// link to the
+    right host would send the session in clear text."""
+    def origin(u):
+        p = urlparse(u)
+        try:
+            port = p.port or {"https": 443, "http": 80}.get(p.scheme)
+        except ValueError:  # a malformed port
+            return None
+        return p.scheme, p.hostname, port
+    return origin(url) is not None and origin(url) == origin(base_url)
+
+
+def clean_path(path: str) -> str | None:
+    """The path with percent-escapes fully decoded, or None when it has dot segments (`..`, `%2e%2e`) that would
+    walk it out of the directory it claims to be in."""
+    prev = None
+    while prev != path:
+        prev, path = path, unquote(path)
+    if "\\" in path or any(seg in (".", "..") for seg in path.split("/")):
+        return None
+    return path
+
+
+def is_blackboard_file(url: str, base_url: str) -> bool:
+    """A link into this Blackboard site's own file store, and nowhere else."""
+    p = clean_path(urlparse(url).path)
+    return same_origin(url, base_url) and p is not None and p.startswith("/bbcswebdav/")
+
+
 def handler_id(item: dict) -> str:
     return ((item.get("contentHandler") or {}).get("id") or "").replace("resource/", "")
 
@@ -74,10 +105,9 @@ def body_links(html: str | None, base_url: str) -> list[dict]:
             if href in seen:
                 continue
             seen.add(href)
-            # Only NTULearn's own file store counts. A link elsewhere that merely mentions bbcswebdav (planted in
-            # course content, say) must never be fetched from the student's machine.
-            u = urlparse(href)
-            internal = u.hostname == urlparse(base_url).hostname and u.path.startswith("/bbcswebdav/")
+            # Only NTULearn's own file store counts. Course content is untrusted: a link elsewhere, over http, or
+            # dot-segmenting out of /bbcswebdav/ must never be fetched with the student's session.
+            internal = is_blackboard_file(href, base_url)
             name, is_image = None, tag == "img"
             if el.get("data-bbfile"):
                 try:
@@ -125,9 +155,16 @@ class Blackboard:
         """The saved session, each cookie scoped to its own domain and path, so redirects to another host
         (file downloads end on Blackboard's alt-*.blackboard.com) don't carry it."""
         jar = httpx.Cookies()
-        host = urlparse(self.s.base_url).hostname or ""
+        base = urlparse(self.s.base_url)
         for c in load_cookies(self.s):
-            jar.set(c["name"], c["value"], domain=c.get("domain") or host, path=c.get("path") or "/")
+            domain = c.get("domain") or base.hostname or ""
+            jar.jar.set_cookie(Cookie(
+                version=0, name=c["name"], value=c["value"], port=None, port_specified=False, domain=domain,
+                domain_specified=True, domain_initial_dot=domain.startswith("."), path=c.get("path") or "/",
+                path_specified=True, expires=None, discard=True, comment=None, comment_url=None, rest={},
+                rfc2109=False,
+                secure=base.scheme == "https" or bool(c.get("secure")),  # never over plain http, even on a redirect
+            ))
         return jar
 
     def _new_client(self) -> httpx.Client:
@@ -139,9 +176,8 @@ class Blackboard:
     def _request(self, method: str, url: str, *, stream: bool = False, retry_auth: bool = True, **kw) -> httpx.Response:
         # Every request starts on the Blackboard host. Redirects Blackboard itself issues (file downloads end on
         # alt-*.blackboard.com) are followed inside httpx and aren't affected.
-        host = urlparse(url).hostname
-        if host and host != urlparse(self.s.base_url).hostname:
-            raise PermissionError(f"refusing to fetch {host}: only {self.s.base_url} is allowed")
+        if urlparse(url).netloc and not same_origin(url, self.s.base_url):
+            raise PermissionError(f"refusing to fetch {url[:80]}: only {self.s.base_url} is allowed")
         if not self._client.cookies:
             if not (self._refresher and self._refresher(self.s)):
                 raise LoginRequired()
@@ -278,6 +314,7 @@ class Blackboard:
 
     def download(self, url: str, dest, *, max_mb: float = 300) -> tuple[str, str]:
         """Stream a file to `dest` (a pathlib.Path). Returns (path, content_type)."""
+        self._check_file_url(url)
         r = self._request("GET", url, stream=True)
         try:
             if r.status_code >= 400:
@@ -299,6 +336,7 @@ class Blackboard:
     def fetch_bytes(self, url: str, *, max_mb: float = 25) -> tuple[bytes, str]:
         """Read a file into memory (for extracting its text). Returns (bytes, content_type)."""
         limit = max_mb * 1024 * 1024
+        self._check_file_url(url)
         r = self._request("GET", url, stream=True)
         try:
             if r.status_code >= 400:
@@ -312,6 +350,12 @@ class Blackboard:
             return bytes(buf), ctype
         finally:
             r.close()
+
+    def _check_file_url(self, url: str) -> None:
+        """Files come only from attachment downloads in the REST API or from the /bbcswebdav/ file store."""
+        p = clean_path(urlparse(url).path)
+        if p is None or not p.startswith((f"{API}/", "/bbcswebdav/")):
+            raise PermissionError(f"not a Blackboard file URL: {url[:80]}")
 
     def attachment_url(self, course_pk: str, content_id: str, att_id: str) -> str:
         return f"{API}/v1/courses/{course_pk}/contents/{content_id}/attachments/{att_id}/download"
