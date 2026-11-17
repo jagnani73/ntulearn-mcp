@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from http.cookiejar import Cookie
 from datetime import datetime, timedelta
 from typing import Any, Callable, Iterator
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -58,19 +58,22 @@ def same_origin(url: str, base_url: str) -> bool:
 
 
 def clean_path(path: str) -> str | None:
-    """The path with percent-escapes fully decoded, or None when it has dot segments (`..`, `%2e%2e`) that would
-    walk it out of the directory it claims to be in."""
+    """The path with percent-escapes fully decoded, or None when the server could read it differently from us.
+
+    Fails closed on dot segments (`..`, `%2e%2e`), and on anything a Java servlet container like Blackboard's
+    Tomcat treats specially: path parameters (`..;/` is `../` there), backslashes and control characters."""
     prev = None
     while prev != path:
         prev, path = path, unquote(path)
-    if "\\" in path or any(seg in (".", "..") for seg in path.split("/")):
+    if any(ch in path for ch in ";\\") or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in path) \
+            or any(seg in (".", "..") for seg in path.split("/")):
         return None
     return path
 
 
 def is_blackboard_file(url: str, base_url: str) -> bool:
     """A link into this Blackboard site's own file store, and nowhere else."""
-    p = clean_path(urlparse(url).path)
+    p = clean_path(urlsplit(url).path)  # urlsplit: urlparse would move a last-segment ";…" out of the path
     return same_origin(url, base_url) and p is not None and p.startswith("/bbcswebdav/")
 
 
@@ -353,7 +356,7 @@ class Blackboard:
 
     def _check_file_url(self, url: str) -> None:
         """Files come only from attachment downloads in the REST API or from the /bbcswebdav/ file store."""
-        p = clean_path(urlparse(url).path)
+        p = clean_path(urlsplit(url).path)
         if p is None or not p.startswith((f"{API}/", "/bbcswebdav/")):
             raise PermissionError(f"not a Blackboard file URL: {url[:80]}")
 
